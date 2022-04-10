@@ -1,37 +1,94 @@
-import sys
-sys.path.append('..')
-
 import gym
 import numpy as np
+import time
+import pickle
 
 from core.replay import *
 from environments.wrappers import *
 from agents.dqn import *
+from utils.logger import *
 
-def train(agent, env, episodes, e_verbose, start):
+def standard_train(agent, env, **params):
+    # training parameters
+    num_steps = params['num_steps']
+    total_steps = params['total_steps']
+    logger = params['logger']
+    save_freq = params['save_freq']
+    e_verbose = params['e_verbose']
     
-    t_steps = 0
-    t_rewards = []
+    t_reward = np.array([])
     
-    for e in range(episodes):
+    start_time = time.time()
+    ep = 0
+    
+    while num_steps < total_steps:
         done = False
-        sum_reward = 0
         state = env.reset()
-        
+        sum_reward = 0
         while not done:
             action = agent.action(state)
-            next_state, reward, done, _ = env.step(action)
+            next_state, reward, done, info = env.step(action)
             agent.remember(state, action, reward, next_state, done)
-            
-            if t_steps > start:
-                agent.update()
-            
-            state = next_state
-            sum_reward += reward
-            t_steps += 1
-            
-        t_rewards.append(sum_reward)
-        
-        if e % e_verbose == 0:
-            print(f'*** episode: {e}, average reward: {np.mean(t_rewards)}, optim steps: {agent.optim_steps}, memory: {len(agent.memory)} ***')
+            agent.update()
 
+            sum_reward += reward
+            state = next_state
+            num_steps += 1
+
+        #agent.update()
+        t_reward = np.append(t_reward, sum_reward)
+        ep += 1
+        
+        if ("return" in info and logger is not None):
+            logger.log(f'{num_steps}, {info["return"]}')
+        
+        # print training status
+        if ep % e_verbose == 0:
+            end_time = time.time()
+            print(f'num steps : {num_steps}, chance : {sum_reward}, average reward: {np.mean(t_reward)}, memory length: {len(agent.replay)}, optim steps: {agent.num_model_updates}, time: {end_time - start_time}')
+            start_time = time.time()
+            t_reward = np.array([])
+
+        # save agent progress
+        if ep % save_freq == 0:                
+            agent.save(save_dir + params['file_name'] + '.pth')
+            with open(save_dir + params['file_name'] + '.pkl', 'wb') as f:
+                pickle.dump(log, f)
+            if verbose:
+                print('Episode ' + str(ep) + ': Saved model weights and log.')
+
+def runner_train(agent, env, **params):
+    # training parameters
+    num_steps = params['num_steps']
+    total_steps = params['total_steps']
+    steps = params['steps']
+    logger = params['logger']
+    save_freq = params['save_freq']
+    e_verbose = params['e_verbose']
+    
+    # env_runner
+    env_runner = Env_Runner(env, agent, logger)
+    
+    # other
+    t_reward = np.array([])
+    start_time = time.time()
+    ep = 0
+    
+    while num_steps < total_steps:
+        sum_reward = 0
+        tuple_list = env_runner.run(steps)
+        for i in tuple_list:
+            agent.remember(i[0], i[1], i[2], i[3], i[4])
+            sum_reward += i[2]
+            
+        agent.update(update=4)
+        t_reward = np.append(t_reward, sum_reward)
+        num_steps += steps
+        ep += 1
+        
+        if ep % e_verbose == 0:
+            end_time = time.time()
+            print(f'num steps : {num_steps}, chance : {sum_reward}, average reward: {np.mean(t_reward)}, memory length: {len(agent.replay)}, optim steps: {agent.num_model_updates}, time: {end_time - start_time}')
+            start_time = time.time()
+            t_reward = np.array([])
+        

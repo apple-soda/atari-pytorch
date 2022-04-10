@@ -8,20 +8,17 @@ class ExperienceReplay:
         self.position = 0
         
     def add(self, state, action, reward, next_state, done):
+        # encode dones to 1
         done = int(not done)
-        state, next_state = torch.tensor(state), torch.tensor(next_state)
         data = (state, action, reward, next_state, done)
         if (self.position >= len(self.memory)):
             self.memory.append(data)
         else:
             self.memory[self.position] = data
         self.position = (self.position + 1) % self.size
-    
+        
     def get(self, batch_size):
-        if len(self.memory) - 1 == 0:
-            indices = np.zeros(batch_size).astype(int)
-        else:
-            indices = np.random.randint(0, len(self.memory) - 1, batch_size)
+        indices = np.random.randint(0, len(self.memory) - 1, batch_size)
         batch = [self.memory[i] for i in indices]
         return batch
     

@@ -4,96 +4,89 @@ import gym
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
 
 from core.replay import *
 from networks.cnn import * 
 
-class DQN:
+class DQNAgent:
     def __init__(self, observation_space, action_space, **params):
         
         self.observation_space = observation_space
         self.action_space = action_space
         
-        # greeks
+        # agent parameters
         self.epsilon = params['epsilon']
         self.epsilon_decay = params['epsilon_decay']
         self.epsilon_min = params['epsilon_min']
         self.gamma = params['gamma']
         self.alpha = params['alpha']
-        
-        # agent
         self.memory_size = params['memory_size']
+        self.num_model_updates = 0
+        self.target_net_updates = params['target_net_updates']
         
-        # network 
+        # network
         self.device = torch.device(params['device'])
-        self.network = params['network']
         self.batch_size = params['batch_size']
-        self.tnet_update = params['tnet_update']
-        
-        # default
         self.dtype = torch.float32
         
-        self._build_agent()
-        
-    def _build_agent(self): # todo : let user specify his/her own loss
-        self.memory = ExperienceReplay(self.memory_size)
-        self.network = self.network.to(self.device)
-        self.optim = torch.optim.Adam(self.network.parameters(), lr=self.alpha)
-        self.loss = nn.SmoothL1Loss().to(self.device)
-        
-        # double dqn
-        if self.tnet_update is not None:
-            self.target_network = copy.deepcopy(self.network)
-        
-        self.optim_steps = 0
-        
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.add(state, action, reward, next_state, done)
+        # _build_agent()
+        self.replay = ExperienceReplay(self.memory_size)
+        self.network = params['network'].to(self.device)
+        self.target_network = params['network'].to(self.device)
+        self.target_network.load_state_dict(self.network.state_dict())
+        self.optim = optim.Adam(self.network.parameters(), lr=self.alpha)
+        self.loss = torch.nn.SmoothL1Loss().to(self.device)
         
     def action(self, state):
         if (random.random() <= self.epsilon):
             action = self.action_space.sample()
         else:
             state = torch.tensor(state, device=self.device, dtype=self.dtype)
-            action_values = self.network(state.unsqueeze(0)).detach().cpu().numpy()
+            action_values = self.network(state.unsqueeze(0) / 255).detach().cpu().numpy()
             action = np.argmax(action_values)
             
         return action
-    
-    def update(self):
-        minibatch = self.memory.get(self.batch_size)
         
-        # unpack tuples and transform to tensors
-        # actions and dones should be integers
-        states = np.stack([i[0] for i in minibatch])
-        next_states = np.stack(i[3] for i in minibatch)
-        states = torch.tensor(states, dtype=self.dtype, device=self.device)
-        next_states = torch.tensor(next_states, dtype=self.dtype, device=self.device)
+    def remember(self, state, action, reward, next_state, done):
+        self.replay.add(state, action, reward, next_state, done)
+                                      
+    def update(self, update=1):
+        for e in range(update):
+            self.optim.zero_grad()
 
-        rewards = torch.tensor([i[2] for i in minibatch], dtype=self.dtype, device=self.device)
-        actions = torch.tensor([i[1] for i in minibatch], device=self.device).unsqueeze(dim=1)
-        dones = torch.tensor([i[4] for i in minibatch], device=self.device)
-        
-        self.optim.zero_grad()
-        
-        # update target network
-        if (self.optim_steps % self.tnet_update == 0):
-            self.target_network.load_state_dict(self.network.state_dict())
-        
-        Q_predicted = torch.gather(self.network(states), 1, actions).squeeze()
-        Q_s1 = self.network(next_states) # a1 is always chosen by original Q network
-        a1 = Q_s1.argmax(dim=1).reshape(-1, 1)
-        Q_target = self.target_network(next_states)
-        Q_actual = rewards + self.gamma * torch.gather(Q_target, 1, a1).squeeze() * dones
-        
-        loss = self.loss(Q_predicted, Q_actual) # input, output
-        loss.backward()
-        self.optim.step()
-        
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-        self.optim_steps += 1
-        
+            minibatch = self.replay.get(self.batch_size)
+
+            # uint8 to float32 and normalize to 0-1
+            obs = (torch.stack([i[0] for i in minibatch]).to(self.device).to(self.dtype)) / 255
+
+            actions = np.stack([i[1] for i in minibatch])
+            actions = torch.tensor(actions).to(self.device).to(torch.int64)
+            rewards = torch.tensor([i[2] for i in minibatch]).to(self.device)
+
+            # uint8 to float32 and normalize to 0-1
+            next_obs = (torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype)) / 255
+
+            dones = torch.tensor([i[4] for i in minibatch]).to(self.device)
+
+            Q_predicted = torch.gather(self.network(obs), 1, actions.unsqueeze(dim=1)).squeeze()
+            Q_s1 = self.network(next_obs)
+            a1 = Q_s1.argmax(dim=1).reshape(-1, 1)
+            Q_prime_s1 = self.target_network(next_obs)
+            Q_actual = rewards + self.gamma * torch.gather(Q_prime_s1, 1, a1).squeeze() * dones
+
+            # loss
+            loss = self.loss(Q_predicted, Q_actual) # torch.mean(torch.pow(obs_Q - target, 2))
+            loss.backward()
+            self.optim.step()
+
+            self.num_model_updates += 1
+            self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+
+            if self.num_model_updates%self.target_net_updates == 0:
+                self.target_network.load_state_dict(self.network.state_dict())
+                
     def save(self, path):
         torch.save({'network': self.network.state_dict(),
                     'optim': self.optim.state_dict()}, path)
