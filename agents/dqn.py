@@ -26,7 +26,7 @@ class DQNAgent:
         self.num_model_updates = 0
         self.target_net_updates = params['target_net_updates']
         
-        # network
+        # network parameters
         self.network_params = params['network_params']
         self.device = torch.device(params['device'])
         self.batch_size = params['batch_size']
@@ -73,7 +73,7 @@ class DQNAgent:
                 dones = torch.tensor([i[4] for i in minibatch]).to(self.device)
 
             # storing frames on the GPU
-            else:
+            elif (isinstance(self.replay, GPUExperienceReplay)):
                 # minibatch should be holding gpu tensors
                 obs = (torch.stack([i[0] for i in minibatch])) / 255
                 actions = torch.stack([i[1] for i in minibatch])    
@@ -81,7 +81,7 @@ class DQNAgent:
                 next_obs = (torch.stack([i[3] for i in minibatch]))
                 dones = [i[4] for i in minibatch]
             
-            Q_predicted = torch.gather(self.network(obs), 1, actions.unsqueeze(dim=1)).squeeze()
+            Q_predicted = torch.gather(self.network(obs), 1, actions.unsqueeze(0)).squeeze()
             Q_s1 = self.network(next_obs)
             a1 = Q_s1.argmax(dim=1).reshape(-1, 1) # a1 is always chosen by original Q 
             Q_prime_s1 = self.target_network(next_obs)
@@ -93,13 +93,13 @@ class DQNAgent:
             self.optim.step()
 
             self.num_model_updates += 1
-            self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
             
             # update target Q network to current Q network
             if self.num_model_updates%self.target_net_updates == 0:
                 self.target_network.load_state_dict(self.network.state_dict())
 
-            # torch.cuda.empty_cache()
+        # update epsilon once per update
+        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
                 
     def save(self, path):
         torch.save({'network': self.network.state_dict(),

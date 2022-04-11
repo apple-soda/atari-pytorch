@@ -3,19 +3,21 @@ import numpy as np
 import cv2
 from collections import deque
 
+# future todo: add additional done for games with lives
 class AtariWrapper(gym.Wrapper):
     def __init__(self, env, size, k):
+        super(AtariWrapper, self).__init__(env)
         self.env = env
         self.k = k
         self.size = size
         self.frames = deque(maxlen=k)
         
     def reset(self):
-        self.returns = 0
+        self.rewards = 0
         state = self.env.reset()
         state = self.process(state)
-        state = np.stack([state for i in range(self.k)]) 
-        return state
+        self.frames = np.stack([state for i in range(self.k)]) 
+        return self.frames
     
     def step(self, action):
         t_reward = 0
@@ -31,10 +33,10 @@ class AtariWrapper(gym.Wrapper):
                 done = True
                 break
         
-        # tracks return for logger
-        self.returns += reward
+        # adds an additional key in info dict, tracks return for logger
+        self.rewards += t_reward
         if done:
-            info["return"] = self.returns
+            info["return"] = self.rewards
             
         # need to figure out a way to return a shape (1, 4, 84, 84) without turning it into 5 dimensional tensor during batch training
         return np.stack(self.frames), t_reward, done, info

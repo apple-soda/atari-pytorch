@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 
+# frames stored on RAM
 class ExperienceReplay:
     def __init__(self, size):
         self.memory = []
@@ -28,7 +29,8 @@ class ExperienceReplay:
     
     def __len__(self):
         return len(self.memory)
-    
+
+# frames stored on GPU 
 class GPUExperienceReplay:
     def __init__(self, size, device):
         self.memory = []

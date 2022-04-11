@@ -8,7 +8,12 @@ from core.replay import *
 from environments.wrappers import *
 from agents.dqn import *
 from utils.logger import *
+from utils.runner import *
 
+"""
+standard training loop for online reinforcement learning agents
+reset state -> take action -> env.step -> add MDP tuple to agent memory -> update gradient -> repeat
+"""
 def standard_train(agent, env, **params):
     # training parameters
     num_steps = params['num_steps']
@@ -19,13 +24,14 @@ def standard_train(agent, env, **params):
     save_dir = params['save_dir']
     
     t_reward = np.array([])
-    
     start_time = time.time()
     ep = 0
     
+    # creates new save directory
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         
+    logger.log("training_step, return")
     log = {'agent':params['file_name'], 'params':params, 'episodes':[]}
     
     while num_steps < total_steps:
@@ -47,13 +53,13 @@ def standard_train(agent, env, **params):
         ep += 1
         log['episodes'] = ep
         
-        if ("return" in info and logger is not None):
+        if ('return' in info and logger is not None):
             logger.log(f'{num_steps}, {info["return"]}')
         
         # print training status
         if ep % e_verbose == 0:
             end_time = time.time()
-            print(f'num steps : {num_steps}, chance : {sum_reward}, average reward: {np.mean(t_reward)}, memory length: {len(agent.replay)}, optim steps: {agent.num_model_updates}, time: {end_time - start_time}')
+            print(f'Steps : {num_steps}, Average Reward: {np.mean(t_reward)}, Memory Length: {len(agent.replay)}, Optimizer Steps: {agent.num_model_updates}, Time Elapsed: {end_time - start_time}')
             start_time = time.time()
             t_reward = np.array([])
 
@@ -64,30 +70,30 @@ def standard_train(agent, env, **params):
                 pickle.dump(log, f)
             if e_verbose:
                 print('Episode ' + str(ep) + ': Saved model weights and log.')
+    
+    env.close()
 
+                
 """
 environment runners are helpful for reducing memory/RAM usage 
 env_runner(16) -> runs the environment for 16 steps, add MDP tuple to agent memory
 perform n gradient updates (typically n = 4)
-
-vs
-
-standard train
-run the environment -> add MDP tuple to agent memory -> perform gradient upate
-"""
-                
+* still a work in progress
+"""                
 def runner_train(agent, env, **params):
     # training parameters
     num_steps = params['num_steps']
     total_steps = params['total_steps']
     steps = params['steps']
     logger = params['logger']
-    save_freq = params['save_freq']
-    e_verbose = params['e_verbose']
+    t_save_freq = params['t_save_freq']
+    t_verbose = params['t_verbose']
+    save_dir = params['save_dir']
     
-    # env_runner
+    # env_runner (env_runner creates logger in __init__)
     env_runner = Env_Runner(env, agent, logger)
-    
+    log = {'agent':params['file_name'], 'params':params, 'episodes':[]}
+
     # other
     t_reward = np.array([])
     start_time = time.time()
@@ -96,6 +102,9 @@ def runner_train(agent, env, **params):
     while num_steps < total_steps:
         sum_reward = 0
         tuple_list = env_runner.run(steps)
+        
+        # unpack list of tuples and insert into replay buffer
+        # this part could be a lot cleaner, todo
         for i in tuple_list:
             agent.remember(i[0], i[1], i[2], i[3], i[4])
             sum_reward += i[2]
@@ -105,9 +114,18 @@ def runner_train(agent, env, **params):
         num_steps += steps
         ep += 1
         
-        if ep % e_verbose == 0:
+        if num_steps % t_verbose < steps:
             end_time = time.time()
-            print(f'num steps : {num_steps}, chance : {sum_reward}, average reward: {np.mean(t_reward)}, memory length: {len(agent.replay)}, optim steps: {agent.num_model_updates}, time: {end_time - start_time}')
+            print(f'Steps : {num_steps}, Average Reward: {np.mean(t_reward)}, Memory Length: {len(agent.replay)}, Optimizer Steps: {agent.num_model_updates}, Time Elapsed: {end_time - start_time}')
             start_time = time.time()
             t_reward = np.array([])
+        
+        if num_steps % t_save_freq < steps:                
+            agent.save(save_dir + params['file_name'] + '.pth')
+            with open(save_dir + params['file_name'] + '.pkl', 'wb') as f:
+                pickle.dump(log, f)
+            if t_verbose:
+                print('Episode ' + str(ep) + ': Saved model weights and log.')
+    
+    env.close()
         
