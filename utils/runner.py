@@ -1,5 +1,4 @@
 class Env_Runner:
-    
     def __init__(self, env, agent, logger):
         super().__init__()
         self.env = env

@@ -2,6 +2,7 @@ import gym
 import numpy as np
 import time
 import pickle
+import os
 
 from core.replay import *
 from environments.wrappers import *
@@ -15,11 +16,17 @@ def standard_train(agent, env, **params):
     logger = params['logger']
     save_freq = params['save_freq']
     e_verbose = params['e_verbose']
+    save_dir = params['save_dir']
     
     t_reward = np.array([])
     
     start_time = time.time()
     ep = 0
+    
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        
+    log = {'agent':params['file_name'], 'params':params, 'episodes':[]}
     
     while num_steps < total_steps:
         done = False
@@ -38,6 +45,7 @@ def standard_train(agent, env, **params):
         #agent.update()
         t_reward = np.append(t_reward, sum_reward)
         ep += 1
+        log['episodes'] = ep
         
         if ("return" in info and logger is not None):
             logger.log(f'{num_steps}, {info["return"]}')
@@ -54,9 +62,20 @@ def standard_train(agent, env, **params):
             agent.save(save_dir + params['file_name'] + '.pth')
             with open(save_dir + params['file_name'] + '.pkl', 'wb') as f:
                 pickle.dump(log, f)
-            if verbose:
+            if e_verbose:
                 print('Episode ' + str(ep) + ': Saved model weights and log.')
 
+"""
+environment runners are helpful for reducing memory/RAM usage 
+env_runner(16) -> runs the environment for 16 steps, add MDP tuple to agent memory
+perform n gradient updates (typically n = 4)
+
+vs
+
+standard train
+run the environment -> add MDP tuple to agent memory -> perform gradient upate
+"""
+                
 def runner_train(agent, env, **params):
     # training parameters
     num_steps = params['num_steps']

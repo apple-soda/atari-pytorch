@@ -8,7 +8,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 from core.replay import *
-from networks.cnn import * 
+from networks.nature_cnn import * 
 
 class DQNAgent:
     def __init__(self, observation_space, action_space, **params):
@@ -27,18 +27,23 @@ class DQNAgent:
         self.target_net_updates = params['target_net_updates']
         
         # network
+        self.network_params = params['network_params']
         self.device = torch.device(params['device'])
         self.batch_size = params['batch_size']
         self.dtype = torch.float32
         
-        # _build_agent()
+        self._build_agent()
+
+    def _build_agent(self):
         self.replay = ExperienceReplay(self.memory_size)
-        self.network = params['network'].to(self.device)
-        self.target_network = params['network'].to(self.device)
+        #self.replay = GPUExperienceReplay(self.memory_size, device='cuda:0')
+        
+        self.network = DQNCNN(*self.network_params).to(self.device)
+        self.target_network = DQNCNN(*self.network_params).to(self.device)
         self.target_network.load_state_dict(self.network.state_dict())
         self.optim = optim.Adam(self.network.parameters(), lr=self.alpha)
         self.loss = torch.nn.SmoothL1Loss().to(self.device)
-        
+    
     def action(self, state):
         if (random.random() <= self.epsilon):
             action = self.action_space.sample()
@@ -54,38 +59,47 @@ class DQNAgent:
                                       
     def update(self, update=1):
         for e in range(update):
-            self.optim.zero_grad()
-
             minibatch = self.replay.get(self.batch_size)
+            self.optim.zero_grad()
+            
+            # storing frames on the RAM
+            if (isinstance(self.replay, ExperienceReplay)):
+                # minibatch should be numpy arrays
+                obs = (torch.stack([i[0] for i in minibatch]).to(self.device).to(self.dtype)) / 255
+                actions = np.stack([i[1] for i in minibatch])
+                actions = torch.tensor(actions).to(self.device).to(torch.int64)
+                rewards = torch.tensor([i[2] for i in minibatch]).to(self.device)
+                next_obs = (torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype)) / 255
+                dones = torch.tensor([i[4] for i in minibatch]).to(self.device)
 
-            # uint8 to float32 and normalize to 0-1
-            obs = (torch.stack([i[0] for i in minibatch]).to(self.device).to(self.dtype)) / 255
-
-            actions = np.stack([i[1] for i in minibatch])
-            actions = torch.tensor(actions).to(self.device).to(torch.int64)
-            rewards = torch.tensor([i[2] for i in minibatch]).to(self.device)
-
-            # uint8 to float32 and normalize to 0-1
-            next_obs = (torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype)) / 255
-
-            dones = torch.tensor([i[4] for i in minibatch]).to(self.device)
-
+            # storing frames on the GPU
+            else:
+                # minibatch should be holding gpu tensors
+                obs = (torch.stack([i[0] for i in minibatch])) / 255
+                actions = torch.stack([i[1] for i in minibatch])    
+                rewards = [i[2] for i in minibatch]
+                next_obs = (torch.stack([i[3] for i in minibatch]))
+                dones = [i[4] for i in minibatch]
+            
             Q_predicted = torch.gather(self.network(obs), 1, actions.unsqueeze(dim=1)).squeeze()
             Q_s1 = self.network(next_obs)
-            a1 = Q_s1.argmax(dim=1).reshape(-1, 1)
+            a1 = Q_s1.argmax(dim=1).reshape(-1, 1) # a1 is always chosen by original Q 
             Q_prime_s1 = self.target_network(next_obs)
             Q_actual = rewards + self.gamma * torch.gather(Q_prime_s1, 1, a1).squeeze() * dones
 
             # loss
-            loss = self.loss(Q_predicted, Q_actual) # torch.mean(torch.pow(obs_Q - target, 2))
+            loss = self.loss(Q_predicted, Q_actual) 
             loss.backward()
             self.optim.step()
 
             self.num_model_updates += 1
             self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-
+            
+            # update target Q network to current Q network
             if self.num_model_updates%self.target_net_updates == 0:
                 self.target_network.load_state_dict(self.network.state_dict())
+
+            # torch.cuda.empty_cache()
                 
     def save(self, path):
         torch.save({'network': self.network.state_dict(),
