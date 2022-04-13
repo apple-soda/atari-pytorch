@@ -4,7 +4,7 @@ import time
 import pickle
 import os
 
-from core.replay import *
+from utils.replay import *
 from environments.wrappers import *
 from agents.ddqn import *
 from utils.logger import *

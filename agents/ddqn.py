@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from core.replay import *
+from utils.replay import *
 from networks.flexnet import * 
 
 class DQNAgent:
@@ -34,8 +34,8 @@ class DQNAgent:
         
         # network parameters
         self.network_params = params['network_params']
-        self.device = torch.device(params['device'])
         self.batch_size = params['batch_size']
+        self.device = torch.device(params['device'])
         self.dtype = torch.float32
         
         self._build_agent()
@@ -44,20 +44,19 @@ class DQNAgent:
         self.replay = ExperienceReplay(self.memory_size)
         #self.replay = GPUExperienceReplay(self.memory_size, device='cuda:0')
         
-        self.network = DQNCNN(*self.network_params).to(self.device)
-        self.target_network = DQNCNN(*self.network_params).to(self.device)
+        self.network = Net(*self.network_params).to(self.device)
+        self.target_network = Net(*self.network_params).to(self.device)
         self.target_network.load_state_dict(self.network.state_dict())
         self.optim = optim.Adam(self.network.parameters(), lr=self.alpha)
         self.loss = torch.nn.SmoothL1Loss()
     
     def action(self, state):
-        if (random.random() < self.epsilon):
-            action = self.action_space.sample()
+        if self.epsilon < random.random():
+            actions = self.network(torch.tensor(state, device=self.device, dtype=self.dtype).unsqueeze(0) / 255)
+            actions = actions.detach().cpu().numpy()
+            action = np.argmax(actions)
         else:
-            state = torch.tensor(state, device=self.device, dtype=self.dtype).unsqueeze(0) / 255
-            action_values = self.network(state).detach().cpu().numpy()
-            action = np.argmax(action_values)
-            
+            action = self.action_space.sample()
         return action
         
     def remember(self, state, action, reward, next_state, done):
@@ -69,17 +68,17 @@ class DQNAgent:
                                       
     def update(self, update=1):
         for e in range(update):
-            minibatch = self.replay.get(self.batch_size)
             self.optim.zero_grad()
+            minibatch = self.replay.get(self.batch_size)
             
             # storing frames on the RAM
             if (isinstance(self.replay, ExperienceReplay)):
                 # minibatch should be numpy arrays
                 obs = (torch.stack([i[0] for i in minibatch]).to(self.device).to(self.dtype)) / 255
+                next_obs = (torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype)) / 255
                 actions = np.stack([i[1] for i in minibatch]).reshape(-1, 1)
                 actions = torch.tensor(actions).to(self.device).to(torch.int64)
                 rewards = torch.tensor([i[2] for i in minibatch]).to(self.device)
-                next_obs = (torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype)) / 255
                 dones = torch.tensor([i[4] for i in minibatch]).to(self.device)
 
             # storing frames on the GPU
