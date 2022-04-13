@@ -15,7 +15,7 @@ class DeepmindCNN(nn.Module):
             torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(64*7*7,512),
+            nn.Linear(3136, 512),
             nn.ReLU(),
             nn.Linear(512, 4)
         ]

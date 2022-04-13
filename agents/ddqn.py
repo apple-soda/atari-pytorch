@@ -9,7 +9,15 @@ import torch.nn.functional as F
 
 from utils.replay import *
 from networks.flexnet import * 
+from networks.deepmind import *
 
+'''
+Implementation of a Double Deep Q Learning Agent (DDQN)
+Converges to optimality using the Bellman Equation
+Q Network aims to minimize the temporal difference error, which serves as the loss function
+
+Q(s, a) = summation 
+'''
 class DQNAgent:
     def __init__(self, observation_space, action_space, **params):
         
@@ -22,9 +30,9 @@ class DQNAgent:
         self.epsilon_min = params['epsilon_min']
         
         # by-frame epsilon calculation
-        self.eps_start = self.epsilon
-        self.eps_interval = self.epsilon - self.epsilon_min
-        self.eps_final = params['eps_final']
+        self.eps_start = params['eps_start']
+        self.eps_interval = params['eps_interval'] 
+        self.eps_ff = params['eps_ff'] # epsilon final frame
         
         self.gamma = params['gamma']
         self.alpha = params['alpha']
@@ -37,6 +45,7 @@ class DQNAgent:
         self.batch_size = params['batch_size']
         self.device = torch.device(params['device'])
         self.dtype = torch.float32
+        self.updates = 0
         
         self._build_agent()
 
@@ -44,8 +53,8 @@ class DQNAgent:
         self.replay = ExperienceReplay(self.memory_size)
         #self.replay = GPUExperienceReplay(self.memory_size, device='cuda:0')
         
-        self.network = Net(*self.network_params).to(self.device)
-        self.target_network = Net(*self.network_params).to(self.device)
+        self.network = DeepmindCNN().to(self.device)
+        self.target_network = DeepmindCNN().to(self.device)
         self.target_network.load_state_dict(self.network.state_dict())
         self.optim = optim.Adam(self.network.parameters(), lr=self.alpha)
         self.loss = torch.nn.SmoothL1Loss()
@@ -64,7 +73,7 @@ class DQNAgent:
     
     # by-frame epsilon updates
     def update_epsilon(self):
-        self.epsilon = max(self.epsilon_min, self.eps_start - (self.eps_interval * self.num_model_updates / self.eps_final))
+        self.epsilon = max(self.epsilon_min, self.eps_start - (self.eps_interval * self.num_model_updates / self.eps_ff))
                                       
     def update(self, update=1):
         for e in range(update):
@@ -74,8 +83,8 @@ class DQNAgent:
             # storing frames on the RAM
             if (isinstance(self.replay, ExperienceReplay)):
                 # minibatch should be numpy arrays
-                obs = (torch.stack([i[0] for i in minibatch]).to(self.device).to(self.dtype)) / 255
-                next_obs = (torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype)) / 255
+                obs = torch.stack([i[0] for i in minibatch]).to(self.device).to(self.dtype) / 255
+                next_obs = torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype) / 255
                 actions = np.stack([i[1] for i in minibatch]).reshape(-1, 1)
                 actions = torch.tensor(actions).to(self.device).to(torch.int64)
                 rewards = torch.tensor([i[2] for i in minibatch]).to(self.device)
@@ -84,10 +93,10 @@ class DQNAgent:
             # storing frames on the GPU
             elif (isinstance(self.replay, GPUExperienceReplay)):
                 # minibatch should be holding gpu tensors
-                obs = (torch.stack([i[0] for i in minibatch])) / 255
+                obs = torch.stack([i[0] for i in minibatch]) / 255
                 actions = torch.stack([i[1] for i in minibatch])    
                 rewards = [i[2] for i in minibatch]
-                next_obs = (torch.stack([i[3] for i in minibatch])) / 255
+                next_obs = torch.stack([i[3] for i in minibatch]) / 255
                 dones = [i[4] for i in minibatch]
             
             Qs = self.network(torch.cat([obs, next_obs]))
@@ -97,9 +106,11 @@ class DQNAgent:
             a1 = torch.argmax(Q_s1, dim=1).reshape(-1, 1)
             Q_s1_p = self.target_network(next_obs)
             
-            Q_predicted = torch.gather(Q_s0, 1, actions).squeeze()
-            Q_actual = torch.gather(Q_s1_p, 1, a1).squeeze()
-
+            Q_predicted = torch.gather(Q_s0, 1, actions).squeeze() # values of chosen actions
+            Q_prime = torch.gather(Q_s1_p, 1, a1).squeeze() # values of optimal actions 
+            
+            Q_actual = rewards + self.gamma * Q_prime * dones # temporal difference error 
+            
             # loss
             loss = self.loss(Q_predicted, Q_actual) 
             loss.backward()
@@ -110,6 +121,7 @@ class DQNAgent:
             # update target Q network to current Q network
             if self.num_model_updates % self.target_net_updates == 0:
                 self.target_network.load_state_dict(self.network.state_dict())
+                self.updates += 1
 
         # traditional epsilon decay
         if self.epsilon_decay:
@@ -125,7 +137,7 @@ class DQNAgent:
         self.network.load_state_dict(checkpoint['network'])
         self.optim.load_state_dict(checkpoint['optim'])
         
-        if self.target_update_freq is not None:
+        if self.target_net_updates is not None:
             self.target_network = copy.deepcopy(self.network)
         
         self.epsilon = .01 # for testing

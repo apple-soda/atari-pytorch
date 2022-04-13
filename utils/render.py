@@ -3,7 +3,7 @@ import time
 import matplotlib.pyplot as plt
 from IPython import display
 
-def render(agent, env, path, runs, timesleep=0.0005):
+def render_agent(agent, env, path, runs, timesleep=0.0005):
     agent = agent
     env = env
     agent.load(path) # sets epsilon to 0.01

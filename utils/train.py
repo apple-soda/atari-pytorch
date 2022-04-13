@@ -22,8 +22,8 @@ def standard_train(agent, env, **params):
     e_verbose = params['e_verbose']
     save_dir = params['save_dir']
     
-    t_reward = []
     start_time = time.time()
+    t_reward = []
     num_steps = 0
     ep = 0
     
@@ -54,7 +54,7 @@ def standard_train(agent, env, **params):
             # print training status
             if num_steps % e_verbose == 0:
                 end_time = time.time()
-                print(f'Steps : {num_steps}, Average Reward: {np.mean(t_reward)}, Memory Length: {len(agent.replay)}, Optimizer Steps: {agent.num_model_updates}, Time Elapsed: {end_time - start_time}')
+                print(f'Steps : {num_steps}, Average Reward: {np.mean(t_reward)}, Memory Length: {len(agent.replay)}, Optimizer Steps: {agent.num_model_updates}, Time Elapsed: {end_time - start_time}, Target Q Updates: {agent.updates}')
                 start_time = time.time()
                 t_reward = []
 
