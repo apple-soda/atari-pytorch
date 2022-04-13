@@ -8,7 +8,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 from core.replay import *
-from networks.nature_cnn import * 
+from networks.flexnet import * 
 
 class DQNAgent:
     def __init__(self, observation_space, action_space, **params):
@@ -20,6 +20,12 @@ class DQNAgent:
         self.epsilon = params['epsilon']
         self.epsilon_decay = params['epsilon_decay']
         self.epsilon_min = params['epsilon_min']
+        
+        # by-frame epsilon calculation
+        self.eps_start = self.epsilon
+        self.eps_interval = self.epsilon - self.epsilon_min
+        self.eps_final = params['eps_final']
+        
         self.gamma = params['gamma']
         self.alpha = params['alpha']
         self.memory_size = params['memory_size']
@@ -42,20 +48,24 @@ class DQNAgent:
         self.target_network = DQNCNN(*self.network_params).to(self.device)
         self.target_network.load_state_dict(self.network.state_dict())
         self.optim = optim.Adam(self.network.parameters(), lr=self.alpha)
-        self.loss = torch.nn.SmoothL1Loss().to(self.device)
+        self.loss = torch.nn.SmoothL1Loss()
     
     def action(self, state):
-        if (random.random() <= self.epsilon):
+        if (random.random() < self.epsilon):
             action = self.action_space.sample()
         else:
-            state = torch.tensor(state, device=self.device, dtype=self.dtype)
-            action_values = self.network(state.unsqueeze(0) / 255).detach().cpu().numpy()
+            state = torch.tensor(state, device=self.device, dtype=self.dtype).unsqueeze(0) / 255
+            action_values = self.network(state).detach().cpu().numpy()
             action = np.argmax(action_values)
             
         return action
         
     def remember(self, state, action, reward, next_state, done):
         self.replay.add(state, action, reward, next_state, done)
+    
+    # by-frame epsilon updates
+    def update_epsilon(self):
+        self.epsilon = max(self.epsilon_min, self.eps_start - (self.eps_interval * self.num_model_updates / self.eps_final))
                                       
     def update(self, update=1):
         for e in range(update):
@@ -66,7 +76,7 @@ class DQNAgent:
             if (isinstance(self.replay, ExperienceReplay)):
                 # minibatch should be numpy arrays
                 obs = (torch.stack([i[0] for i in minibatch]).to(self.device).to(self.dtype)) / 255
-                actions = np.stack([i[1] for i in minibatch])
+                actions = np.stack([i[1] for i in minibatch]).reshape(-1, 1)
                 actions = torch.tensor(actions).to(self.device).to(torch.int64)
                 rewards = torch.tensor([i[2] for i in minibatch]).to(self.device)
                 next_obs = (torch.stack([i[3] for i in minibatch]).to(self.device).to(self.dtype)) / 255
@@ -78,14 +88,18 @@ class DQNAgent:
                 obs = (torch.stack([i[0] for i in minibatch])) / 255
                 actions = torch.stack([i[1] for i in minibatch])    
                 rewards = [i[2] for i in minibatch]
-                next_obs = (torch.stack([i[3] for i in minibatch]))
+                next_obs = (torch.stack([i[3] for i in minibatch])) / 255
                 dones = [i[4] for i in minibatch]
             
-            Q_predicted = torch.gather(self.network(obs), 1, actions.unsqueeze(0)).squeeze()
-            Q_s1 = self.network(next_obs)
-            a1 = Q_s1.argmax(dim=1).reshape(-1, 1) # a1 is always chosen by original Q 
-            Q_prime_s1 = self.target_network(next_obs)
-            Q_actual = rewards + self.gamma * torch.gather(Q_prime_s1, 1, a1).squeeze() * dones
+            Qs = self.network(torch.cat([obs, next_obs]))
+            Q_s0, Q_s1 = torch.split(Qs, self.batch_size, dim=0)
+            
+            # action is always chosen by original Q
+            a1 = torch.argmax(Q_s1, dim=1).reshape(-1, 1)
+            Q_s1_p = self.target_network(next_obs)
+            
+            Q_predicted = torch.gather(Q_s0, 1, actions).squeeze()
+            Q_actual = torch.gather(Q_s1_p, 1, a1).squeeze()
 
             # loss
             loss = self.loss(Q_predicted, Q_actual) 
@@ -95,11 +109,12 @@ class DQNAgent:
             self.num_model_updates += 1
             
             # update target Q network to current Q network
-            if self.num_model_updates%self.target_net_updates == 0:
+            if self.num_model_updates % self.target_net_updates == 0:
                 self.target_network.load_state_dict(self.network.state_dict())
 
-        # update epsilon once per update
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+        # traditional epsilon decay
+        if self.epsilon_decay:
+            self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
                 
     def save(self, path):
         torch.save({'network': self.network.state_dict(),

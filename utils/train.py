@@ -6,7 +6,7 @@ import os
 
 from core.replay import *
 from environments.wrappers import *
-from agents.dqn import *
+from agents.ddqn import *
 from utils.logger import *
 from utils.runner import *
 
@@ -16,15 +16,15 @@ reset state -> take action -> env.step -> add MDP tuple to agent memory -> updat
 """
 def standard_train(agent, env, **params):
     # training parameters
-    num_steps = params['num_steps']
     total_steps = params['total_steps']
     logger = params['logger']
     save_freq = params['save_freq']
     e_verbose = params['e_verbose']
     save_dir = params['save_dir']
     
-    t_reward = np.array([])
+    t_reward = []
     start_time = time.time()
+    num_steps = 0
     ep = 0
     
     # creates new save directory
@@ -38,38 +38,40 @@ def standard_train(agent, env, **params):
         done = False
         state = env.reset()
         sum_reward = 0
+        agent.update_epsilon() # if using by-frame epsilon updates
+        
         while not done:
             action = agent.action(state)
-            next_state, reward, done, info = env.step(action)
+            next_state, reward, done, info, _ = env.step(action)
             agent.remember(state, action, reward, next_state, done)
-            agent.update()
 
             sum_reward += reward
             state = next_state
             num_steps += 1
+            
+            agent.update()
+            
+            # print training status
+            if num_steps % e_verbose == 0:
+                end_time = time.time()
+                print(f'Steps : {num_steps}, Average Reward: {np.mean(t_reward)}, Memory Length: {len(agent.replay)}, Optimizer Steps: {agent.num_model_updates}, Time Elapsed: {end_time - start_time}')
+                start_time = time.time()
+                t_reward = []
 
-        #agent.update()
-        t_reward = np.append(t_reward, sum_reward)
+            # save agent progress
+            if num_steps % save_freq == 0:                
+                agent.save(save_dir + params['file_name'] + '.pth')
+                with open(save_dir + params['file_name'] + '.pkl', 'wb') as f:
+                    pickle.dump(log, f)
+                if e_verbose:
+                    print('Episode ' + str(ep) + ': Saved model weights and log.')
+
+        t_reward.append(sum_reward)
         ep += 1
         log['episodes'] = ep
         
-        if ('return' in info and logger is not None):
-            logger.log(f'{num_steps}, {info["return"]}')
-        
-        # print training status
-        if ep % e_verbose == 0:
-            end_time = time.time()
-            print(f'Steps : {num_steps}, Average Reward: {np.mean(t_reward)}, Memory Length: {len(agent.replay)}, Optimizer Steps: {agent.num_model_updates}, Time Elapsed: {end_time - start_time}')
-            start_time = time.time()
-            t_reward = np.array([])
-
-        # save agent progress
-        if ep % save_freq == 0:                
-            agent.save(save_dir + params['file_name'] + '.pth')
-            with open(save_dir + params['file_name'] + '.pkl', 'wb') as f:
-                pickle.dump(log, f)
-            if e_verbose:
-                print('Episode ' + str(ep) + ': Saved model weights and log.')
+        if logger:
+            logger.log(f'{num_steps}, {sum_reward}')
     
     env.close()
 
