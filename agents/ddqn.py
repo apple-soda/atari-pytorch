@@ -13,10 +13,19 @@ from networks.deepmind import *
 
 '''
 Implementation of a Double Deep Q Learning Agent (DDQN)
-Converges to optimality using the Bellman Equation
-Q Network aims to minimize the temporal difference error, which serves as the loss function
+For environments with small, discrete action spaces, Q-learning approaches are able to effectively converge to optimality
 
-Q(s, a) = summation 
+Q(s, a) = Q(s, a) + R(s, a, s') * γ * max(Q(s', a'))
+    Q(s, a) : values given the current state and selected actions
+    max(Q(s', a')) : values of optimal actions given the next state
+    
+    Q_predicted : Q(s, a)
+    Q_target : max(Q(s', a'))
+    
+The agent converges to optimality by minimizing the loss given by the temporal difference:
+    temporal difference = R(s, a, s') * γ * max(Q(s', a')) - Q(s, a)
+    temporal difference = Q_target - Q_predicted
+    loss = SmoothL1Loss(Q_predicted, Q_target)
 '''
 class DQNAgent:
     def __init__(self, observation_space, action_space, **params):
