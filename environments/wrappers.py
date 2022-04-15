@@ -16,13 +16,9 @@ class AtariWrapper(gym.Wrapper):
         self.last_life_count = 0
         ob = self.env.reset()
         ob = self.preprocess_observation(ob)
-        
-        # stack k times the reset ob
         for i in range(self.k):
             self.frame_stack.append(ob)
-        
         return np.stack(self.frame_stack) # [4, 84, 84]
-    
     
     def step(self, action): 
         reward = 0
@@ -31,9 +27,8 @@ class AtariWrapper(gym.Wrapper):
         
         # k frame skips or end of episode
         for i in range(self.k):
-            
             ob, r, d, info = self.env.step(action)
-            
+    
             # insert a (additional) done, when agent loses a life (Games with lives)
             if self.use_add_done:
                 if info['ale.lives'] < self.last_life_count:
@@ -42,14 +37,11 @@ class AtariWrapper(gym.Wrapper):
             
             ob = self.preprocess_observation(ob)
             self.frame_stack.append(ob)
-            
-            # add reward
             reward += r
             
             if d: # env done
                 done = True
                 break
-            
         return np.stack(self.frame_stack), reward, done, info, additional_done # [4, 84, 84]
       
     def preprocess_observation(self, ob):
