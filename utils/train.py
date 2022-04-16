@@ -42,7 +42,7 @@ def standard_train(agent, env, **params):
         
         while not done:
             action = agent.action(state)
-            next_state, reward, done, info, _ = env.step(action)
+            next_state, reward, done, info = env.step(action)
             agent.remember(state, action, reward, next_state, done)
 
             sum_reward += reward

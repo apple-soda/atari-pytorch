@@ -8,6 +8,7 @@ import cv2
 Atari Wrappers adapted from OpenAI Gym for Deepmind-style atari preprocessing
 '''
 
+# purely for statistical gathering, has no effect on environment dynamics
 class MonitorEnv(gym.Wrapper):
     def __init__(self, env=None):
         """Record episodes stats prior to EpisodicLifeEnv, etc."""
@@ -57,7 +58,7 @@ class MonitorEnv(gym.Wrapper):
             yield (self._episode_rewards[i], self._episode_lengths[i])
         self._num_returned = len(self._episode_rewards)
 
-
+# i feel like noop is kinda useless too
 class NoopResetEnv(gym.Wrapper):
     def __init__(self, env, noop_max=30):
         """Sample initial states by taking random number of no-ops on reset.
@@ -96,7 +97,7 @@ class ClipRewardEnv(gym.RewardWrapper):
     def reward(self, reward):
         return np.sign(reward)
 
-
+# i feel like this is pretty unnecessary since the agent will learn to shoot by itself...
 class FireResetEnv(gym.Wrapper):
     def __init__(self, env):
         """Take action on reset.
@@ -186,7 +187,7 @@ class MaxAndSkipEnv(gym.Wrapper):
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
 
-
+# rename to Resize or something idk. Could honestly remove this wrapper entirely...?
 class WarpFrame(gym.ObservationWrapper):
     def __init__(self, env, dim):
         """Warp frames to the specified size (dim x dim)."""
@@ -202,7 +203,6 @@ class WarpFrame(gym.ObservationWrapper):
         frame = cv2.resize(frame, dsize=(self.height, self.width), interpolation =cv2.INTER_AREA)
         return frame[:, :, None]
 
-# TODO: (sven) Deprecated class. Remove once traj. view is the norm.
 class FrameStack(gym.Wrapper):
     def __init__(self, env, k):
         """Stack k last frames."""
@@ -236,6 +236,7 @@ class FrameStack(gym.Wrapper):
         # note that this shape is not supported for plt.imshow so need to convert back to visualize
         return np.concatenate(self.frames, axis=2).reshape(self.k, self.frames[0].shape[0], self.frames[0].shape[1])
 
+'''Deprecated Class'''
 class FrameStackTrajectoryView(gym.ObservationWrapper):
     def __init__(self, env):
         """No stacking. Trajectory View API takes care of this."""
@@ -264,13 +265,17 @@ class ScaledFloatFrame(gym.ObservationWrapper):
         return np.array(observation).astype(np.float32) / 255.0
 
 
-def Wrap_Deepmind(env, dim=84, framestack=4):
-    env = MonitorEnv(env)
-    env = NoopResetEnv(env, noop_max=30)
-    if env.spec is not None and "NoFrameskip" in env.spec.id:
+def Wrap_Deepmind(env, dim=84, framestack=4, Monitor=False, NoopReset=False, EpisodicLife=False, FireReset=False):
+    if Monitor:
+        env = MonitorEnv(env)
+    if NoopReset:
+        env = NoopResetEnv(env, noop_max=30)
+    if "NoFrameskip" in env.spec.id:
         env = MaxAndSkipEnv(env, skip=4)
-    env = EpisodicLifeEnv(env)
-    if "FIRE" in env.unwrapped.get_action_meanings():
+    if EpisodicLife:
+        env = EpisodicLifeEnv(env)
+    #if "FIRE" in env.unwrapped.get_action_meanings():
+    if FireReset:
         env = FireResetEnv(env)
     env = WarpFrame(env, dim)
     # env = ScaledFloatFrame(env)  # TODO: use for dqn?

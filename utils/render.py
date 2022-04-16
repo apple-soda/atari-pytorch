@@ -17,7 +17,7 @@ def render_agent(agent, env, path, runs, timesleep=0.0005):
         while not done:
             render(env)
             action = agent.action(state)
-            next_state, reward, done, info, _ = env.step(action)
+            next_state, reward, done, info = env.step(action)
             state = next_state
             t_reward += reward
 
