@@ -62,8 +62,13 @@ class DQNAgent:
         self.replay = ExperienceReplay(self.memory_size)
         #self.replay = GPUExperienceReplay(self.memory_size, device='cuda:0')
         
-        self.network = DeepmindCNN().to(self.device)
-        self.target_network = DeepmindCNN().to(self.device)
+        '''Preconfigured Deepmind CNN Architecture'''
+        # self.network = DeepmindCNN().to(self.device)
+        # self.target_network = DeepmindCNN().to(self.device)
+        
+        '''Flexible user-specified network'''
+        self.network = Net(*self.network_params).to(self.device)
+        self.target_network = Net(*self.network_params).to(self.device)
         self.target_network.load_state_dict(self.network.state_dict())
         self.optim = optim.Adam(self.network.parameters(), lr=self.alpha)
         self.loss = torch.nn.SmoothL1Loss()
